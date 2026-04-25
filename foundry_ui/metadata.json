@@ -1,0 +1,14 @@
+{
+  "metadata": {
+    "index": 15,
+    "module": "foundry_ui_extension",
+    "maintained_by": "devinsheppard",
+    "display_name": "Foundry UI",
+    "description": [
+      "Install Foundry UI as a Moonraker web interface.",
+      "Builds the frontend, installs Linux dependencies, and deploys through nginx."
+    ],
+    "repo": "https://github.com/devinsheppard/foundry-ui",
+    "updates": true
+  }
+}
