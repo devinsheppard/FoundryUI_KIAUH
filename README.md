@@ -16,6 +16,7 @@ into an existing KIAUH checkout without requiring a permanent fork of KIAUH.
 - builds the app with `npm`
 - deploys the static site to `/var/www/foundryui`
 - creates an nginx site config that proxies `/moonraker` to Moonraker
+- defaults to a one-confirm install path with saved settings reuse
 - supports update and removal from the same KIAUH extension menu
 
 ## Install The Extension Into KIAUH
@@ -42,6 +43,9 @@ Then open:
 Extensions -> Foundry UI -> Install
 ```
 
+The installer now offers a recommended-defaults path first. In the common case,
+you can choose `Install`, confirm the defaults, and let it run.
+
 ## Defaults Used By The Installer
 
 - Foundry repo: `https://github.com/devinsheppard/foundry-ui.git`
@@ -51,8 +55,11 @@ Extensions -> Foundry UI -> Install
 - nginx config: `foundry-ui.conf`
 - Default listen port: `7137`
 - Default Moonraker upstream: `127.0.0.1:7125`
+- Default writes: `enabled`
+- Default printer host label: auto-detected from the Linux hostname when possible
 
-The installer prompts before using those values so you can override them.
+The installer first offers those recommended values automatically, then falls
+back to a manual prompt flow only if you decline the defaults.
 
 ## Update And Remove
 

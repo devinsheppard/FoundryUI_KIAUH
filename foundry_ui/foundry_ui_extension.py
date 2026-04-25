@@ -1,3 +1,4 @@
+import os
 import json
 import re
 import shutil
@@ -42,16 +43,33 @@ SYSTEM_PACKAGES = {
 class FoundryUiExtension(BaseExtension):
     def install_extension(self, **kwargs) -> None:
         Logger.print_status("Installing Foundry UI ...")
+        recommended_config = self._build_recommended_install_config()
         Logger.print_dialog(
             DialogType.ATTENTION,
             [
                 "Foundry UI will be built locally with npm and served through nginx.",
                 "The installer can add Node.js if the system version is missing or too old.",
+                (
+                    "Recommended defaults: "
+                    f"repo={recommended_config['repo_url']}, "
+                    f"branch={recommended_config['branch']}, "
+                    f"port={recommended_config['port']}, "
+                    f"moonraker={recommended_config['moonraker_host']}:"
+                    f"{recommended_config['moonraker_port']}, "
+                    f"printer_host={recommended_config['printer_host']}."
+                ),
                 "Choose a free port unless you intentionally want to replace another web UI.",
             ],
         )
 
-        install_config = self._prompt_install_config()
+        if get_confirm(
+            "Use recommended Foundry UI install settings",
+            default_choice=True,
+        ):
+            install_config = recommended_config
+        else:
+            install_config = self._prompt_install_config(recommended_config)
+
         if install_config is None:
             Logger.print_info("Foundry UI installation aborted.")
             return
@@ -136,11 +154,11 @@ class FoundryUiExtension(BaseExtension):
         except Exception as e:
             Logger.print_error(f"Error during Foundry UI removal: {e}")
 
-    def _prompt_install_config(self) -> dict | None:
+    def _prompt_install_config(self, defaults: dict) -> dict | None:
         port = get_number_input(
             "On which port should Foundry UI run",
             min_value=80,
-            default=DEFAULT_PORT,
+            default=defaults["port"],
             allow_go_back=True,
         )
         if port is None:
@@ -149,50 +167,45 @@ class FoundryUiExtension(BaseExtension):
         repo_url = get_string_input(
             "Foundry UI git repository",
             allow_special_chars=True,
-            default=FOUNDRY_REPO,
+            default=defaults["repo_url"],
         )
         branch = get_string_input(
             "Foundry UI git branch",
             regex=r"^[A-Za-z0-9._/-]+$",
-            default=FOUNDRY_BRANCH,
+            default=defaults["branch"],
         )
         moonraker_host = get_string_input(
             "Moonraker host or IP",
             regex=r"^[A-Za-z0-9._-]+$",
-            default=DEFAULT_MOONRAKER_HOST,
+            default=defaults["moonraker_host"],
         )
         moonraker_port = get_number_input(
             "Moonraker port",
             min_value=1,
             max_value=65535,
-            default=DEFAULT_MOONRAKER_PORT,
+            default=defaults["moonraker_port"],
         )
         enable_writes = get_confirm(
             "Enable printer write actions in Foundry UI",
-            default_choice=True,
+            default_choice=defaults["enable_writes"],
         )
         printer_id = get_string_input(
             "Printer ID label",
             regex=r"^[A-Za-z0-9._-]+$",
-            default=DEFAULT_PRINTER_ID,
+            default=defaults["printer_id"],
         )
         printer_name = get_string_input(
             "Printer display name",
             allow_special_chars=True,
-            default=DEFAULT_PRINTER_NAME,
+            default=defaults["printer_name"],
         )
         printer_host = get_string_input(
             "Printer host label",
             allow_special_chars=True,
-            default=DEFAULT_PRINTER_HOST,
+            default=defaults["printer_host"],
         )
 
-        refresh_existing = True
-        if FOUNDRY_DIR.exists():
-            refresh_existing = get_confirm(
-                f"Refresh the existing checkout at '{FOUNDRY_DIR}'",
-                default_choice=True,
-            )
+        refresh_existing = defaults["refresh_existing"]
 
         return {
             "repo_url": repo_url,
@@ -205,6 +218,23 @@ class FoundryUiExtension(BaseExtension):
             "printer_name": printer_name,
             "printer_host": printer_host,
             "refresh_existing": bool(refresh_existing),
+        }
+
+    def _build_recommended_install_config(self) -> dict:
+        manifest = self._read_manifest() or {}
+        hostname = self._get_hostname_label()
+
+        return {
+            "repo_url": manifest.get("repo_url", FOUNDRY_REPO),
+            "branch": manifest.get("branch", FOUNDRY_BRANCH),
+            "port": manifest.get("port", DEFAULT_PORT),
+            "moonraker_host": manifest.get("moonraker_host", DEFAULT_MOONRAKER_HOST),
+            "moonraker_port": manifest.get("moonraker_port", DEFAULT_MOONRAKER_PORT),
+            "enable_writes": manifest.get("enable_writes", True),
+            "printer_id": manifest.get("printer_id", hostname or DEFAULT_PRINTER_ID),
+            "printer_name": manifest.get("printer_name", DEFAULT_PRINTER_NAME),
+            "printer_host": manifest.get("printer_host", hostname or DEFAULT_PRINTER_HOST),
+            "refresh_existing": True,
         }
 
     def _ensure_nodejs(self) -> None:
@@ -269,6 +299,7 @@ class FoundryUiExtension(BaseExtension):
                     FOUNDRY_DIR.as_posix(),
                 ],
                 "Cloning Foundry UI repository",
+                env=self._git_env(),
             )
         else:
             if refresh_existing:
@@ -276,11 +307,13 @@ class FoundryUiExtension(BaseExtension):
                     ["git", "remote", "set-url", "origin", repo_url],
                     "Updating Foundry UI origin",
                     cwd=FOUNDRY_DIR,
+                    env=self._git_env(),
                 )
                 self._run_command(
                     ["git", "fetch", "origin"],
                     "Fetching Foundry UI updates",
                     cwd=FOUNDRY_DIR,
+                    env=self._git_env(),
                 )
             else:
                 Logger.print_info("Reusing existing Foundry UI checkout without fetch.")
@@ -289,12 +322,14 @@ class FoundryUiExtension(BaseExtension):
             ["git", "checkout", branch],
             f"Checking out branch '{branch}'",
             cwd=FOUNDRY_DIR,
+            env=self._git_env(),
         )
         if refresh_existing:
             self._run_command(
                 ["git", "pull", "--ff-only", "origin", branch],
                 f"Pulling branch '{branch}'",
                 cwd=FOUNDRY_DIR,
+                env=self._git_env(),
             )
 
     def _write_env_file(self, install_config: dict) -> None:
@@ -401,15 +436,39 @@ class FoundryUiExtension(BaseExtension):
             return json.load(manifest_file)
 
     def _run_command(
-        self, command: list[str], status: str, cwd: Path | None = None
+        self,
+        command: list[str],
+        status: str,
+        cwd: Path | None = None,
+        env: dict[str, str] | None = None,
     ) -> None:
         Logger.print_status(f"{status} ...")
         try:
-            run(command, cwd=cwd, stderr=PIPE, check=True)
+            run(command, cwd=cwd, stderr=PIPE, check=True, env=env)
             Logger.print_ok("OK!")
         except CalledProcessError as e:
             details = e.stderr.decode() if e.stderr else str(e)
             raise RuntimeError(details.strip()) from e
+
+    def _git_env(self) -> dict[str, str]:
+        env = os.environ.copy()
+        env["GIT_TERMINAL_PROMPT"] = "0"
+        return env
+
+    def _get_hostname_label(self) -> str:
+        try:
+            result = run(
+                ["hostname"],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            hostname = result.stdout.strip().lower()
+            if not hostname:
+                return ""
+            return re.sub(r"[^a-z0-9._-]", "-", hostname)
+        except (CalledProcessError, FileNotFoundError):
+            return ""
 
     def _get_local_ipv4(self) -> str:
         try:
